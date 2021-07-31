@@ -43,3 +43,9 @@ instance impl (Pt a) where
   display :: (Show a, IsString str) => str
   display = fromString $ "<" ++ show self.x ++ "," ++ show self.y ++ ">"
 ```
+
+## Warning
+
+This is still pretty experimental, so things may not work as expected
+and the error messages can sometimes be pretty bad. Feel free to
+create an issue if something goes wrong.
