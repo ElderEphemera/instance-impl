@@ -23,6 +23,7 @@ source-repository head
 library
   exposed-modules:
     InstanceImpl
+    InstanceImpl.FunDepJailbreak
   hs-source-dirs: src
   ghc-options: -Wall
   build-depends:

@@ -21,14 +21,25 @@ instance impl Pt where
   r :: Double
   r = sqrt $ sq self.x + sq self.y
     where sq v = v*v
-
-  θ :: Double
-  θ = atan2 self.y self.x
 ```
 
-will allow you to use `r` and `θ` as fields with `-XOverloadedRecordDot` just as
-you would use `x` and `y`.
+will allow you to use `r` as a field with `-XOverloadedRecordDot` just
+as you would use `x` and `y`.
 
-## Limitations
+You can also use polymorphism, both in the type of the record and the
+type of the field:
 
-Currently you cannot have fields with polymorphic types.
+```
+data Pt a = Pt { x, y :: !a }
+
+instance impl (Pt a) where
+  x' :: Real a => Double
+  x' = realToFrac self.x
+
+  r :: Floating a => a
+  r = sqrt $ sq self.x + sq self.y
+    where sq v = v*v
+
+  display :: (Show a, IsString str) => str
+  display = fromString $ "<" ++ show self.x ++ "," ++ show self.y ++ ">"
+```

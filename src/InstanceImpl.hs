@@ -3,6 +3,7 @@
 module InstanceImpl (plugin) where
 
 import qualified Data.Generics as G
+import Data.List
 
 import GHC.Data.Bag
 import GHC.Hs
@@ -29,7 +30,7 @@ desugarMod hpm@(HsParsedModule { hpm_module = L l hm@(HsModule
    , hsmodDecls = decls
    }) }) =
   hpm { hpm_module = L l $ hm
-   { hsmodImports = importGhcRecords : imports
+   { hsmodImports = extraImports ++ imports
    , hsmodDecls = G.everywhereM (G.mkM desugarInst) =<< decls
    } }
 
@@ -48,10 +49,13 @@ desugarInst ClsInstDecl
       L _ (ClassOpSig _ _ idps (L _ sigtype)) <- sigs
       L _ (Unqual name) <- idps
       bind <- bagToList $ mapMaybeBag (morphBind name) binds
+      let (bndrs, nodep) = sigTyVars sigtype $ tyVars ty
+          (ctxs, bareSigtype) = splitQual $ sig_body sigtype
       pure $ ClsInstDecl
         { cid_ext = (EpAnnNotUsed, NoAnnSortKey)
-        , cid_poly_ty = gen . HsSig noExtField (HsOuterImplicit noExtField)
-          $ hasField `app` symbol name `app` ty `app` sig_body sigtype
+        , cid_poly_ty = gen . HsSig noExtField bndrs
+          $ qual (ctxs ++ jailbreakCtx nodep)
+          $ hasField `app` symbol name `app` ty `app` bareSigtype
         , cid_binds = unitBag bind
         , cid_sigs = []
         , cid_tyfam_insts = []
@@ -62,11 +66,11 @@ desugarInst inst = [inst]
 
 --------------------------------------------------------------------------------
 
-importGhcRecords :: LImportDecl GhcPs
-importGhcRecords = gen $ ImportDecl
+mkImport :: ModuleName -> LImportDecl GhcPs
+mkImport modName = gen $ ImportDecl
   { ideclExt = EpAnnNotUsed
   , ideclSourceSrc = NoSourceText
-  , ideclName = genL ghcRecords
+  , ideclName = genL modName
   , ideclPkgQual = Nothing
   , ideclSource = NotBoot
   , ideclSafe = False
@@ -76,14 +80,24 @@ importGhcRecords = gen $ ImportDecl
   , ideclHiding = Nothing
   }
 
+extraImports :: [LImportDecl GhcPs]
+extraImports = mkImport <$> [ghcRecords, funDepJailbreak]
+
 ghcRecords :: ModuleName
 ghcRecords = mkModuleName "GHC.Records"
+
+funDepJailbreak :: ModuleName
+funDepJailbreak = mkModuleName "InstanceImpl.FunDepJailbreak"
 
 symbol :: OccName -> LHsType GhcPs
 symbol = gen . HsTyLit noExtField . HsStrTy NoSourceText . occNameFS
 
 app :: LHsType GhcPs -> LHsType GhcPs -> LHsType GhcPs
 app f x = gen $ HsAppTy noExtField f x
+
+qual :: [LHsType GhcPs] -> LHsType GhcPs -> LHsType GhcPs
+qual [] x = x
+qual cs x = gen $ HsQualTy noExtField (Just $ gen cs) x
 
 hasField :: LHsType GhcPs
 hasField
@@ -92,6 +106,37 @@ hasField
 
 impl :: FastString
 impl = "impl"
+
+sigTyVars
+  :: HsSigType GhcPs
+  -> [RdrName]
+  -> (HsOuterTyVarBndrs Specificity GhcPs, [RdrName])
+sigTyVars (HsSig _ (HsOuterExplicit a opBndrs) _) headTvs =
+  ( HsOuterExplicit a
+    $ map (gen . UserTyVar EpAnnNotUsed InferredSpec . gen) headTvs ++ opBndrs
+  , tyVars =<< opBndrs
+  )
+sigTyVars (HsSig _ hsOuterImplicit ty) headTvs =
+  ( hsOuterImplicit
+  , nub (tyVars ty) \\ headTvs
+  )
+
+tyVars :: G.Data a => a -> [RdrName]
+tyVars = G.listify isRdrTyVar
+
+splitQual :: LHsType GhcPs -> ([LHsType GhcPs], LHsType GhcPs)
+splitQual (L _ (HsQualTy _ (Just (L _ ctxs)) ty)) = (ctxs, ty)
+splitQual ty = ([], ty)
+
+jailbreakCtx :: [RdrName] -> [LHsType GhcPs]
+jailbreakCtx = map
+  $ app jailbreak . gen
+  . HsTyVar EpAnnNotUsed NotPromoted . gen
+
+jailbreak :: LHsType GhcPs
+jailbreak
+  = gen . HsTyVar EpAnnNotUsed NotPromoted
+  . gen . mkRdrQual funDepJailbreak $ mkClsOcc "Jailbreak"
 
 --------------------------------------------------------------------------------
 
