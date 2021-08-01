@@ -9,6 +9,7 @@ import GHC.Data.Bag
 import GHC.Hs
 import GHC.LanguageExtensions.Type
 import GHC.Plugins
+import GHC.Types.Error
 import GHC.Types.SourceText
 
 --------------------------------------------------------------------------------
@@ -16,25 +17,57 @@ import GHC.Types.SourceText
 plugin :: Plugin
 plugin = defaultPlugin
   { driverPlugin = \_opts -> pure . addExts
-  , parsedResultAction = \_opts _summary -> pure . desugarMod
+  , parsedResultAction = \_opts _summary -> desugarMod
   , pluginRecompile = purePlugin
   }
+
+--------------------------------------------------------------------------------
+
+data M a = M (Bag (MsgEnvelope DecoratedSDoc)) [a]
+
+instance Functor M where
+  fmap f (M errs xs) = M errs (map f xs)
+
+instance Applicative M where
+  pure x = M emptyBag [x]
+  M ferrs fxs <*> M xerrs xxs = M (unionBags ferrs xerrs) (fxs <*> xxs)
+
+instance Monad M where
+  M errs xs >>= f =
+    let (errss, xss) = unzip $ map (mtuple . f) xs
+    in M (unionManyBags $ errs:errss) (concat xss)
+    where mtuple (M errs' xs') = (errs', xs')
+
+instance MonadFail M where
+  fail _ = M emptyBag []
+
+mkM :: [a] -> M a
+mkM = M emptyBag
+
+errM :: MsgEnvelope DecoratedSDoc -> M a
+errM err = M (unitBag err) []
+
+runM :: M a -> Hsc [a]
+runM (M errs xs) = Hsc $ \_env msgs -> pure (xs, unionBags errs msgs)
+
+--------------------------------------------------------------------------------
 
 addExts :: HscEnv -> HscEnv
 addExts env@(HscEnv { hsc_dflags = dflags }) =
   env { hsc_dflags = xopt_set dflags DataKinds }
 
-desugarMod :: HsParsedModule -> HsParsedModule
+desugarMod :: HsParsedModule -> Hsc HsParsedModule
 desugarMod hpm@(HsParsedModule { hpm_module = L l hm@(HsModule
-   { hsmodImports = imports
-   , hsmodDecls = decls
-   }) }) =
-  hpm { hpm_module = L l $ hm
+    { hsmodImports = imports
+    , hsmodDecls = decls
+    }) }) = do
+  decls' <- runM $ G.everywhereM (G.mkM desugarInst) =<< mkM decls
+  pure $ hpm { hpm_module = L l $ hm
    { hsmodImports = extraImports ++ imports
-   , hsmodDecls = G.everywhereM (G.mkM desugarInst) =<< decls
+   , hsmodDecls = decls'
    } }
 
-desugarInst :: ClsInstDecl GhcPs -> [ClsInstDecl GhcPs]
+desugarInst :: ClsInstDecl GhcPs -> M (ClsInstDecl GhcPs)
 desugarInst ClsInstDecl
   { cid_poly_ty =
     L _ (HsSig _ (HsOuterImplicit _)
@@ -46,9 +79,12 @@ desugarInst ClsInstDecl
   }
   | occNameFS cls == impl
   = do
-      L _ (ClassOpSig _ _ idps (L _ sigtype)) <- sigs
-      L _ (Unqual name) <- idps
-      bind <- bagToList $ mapMaybeBag (morphBind name) binds
+      L (SrcSpanAnn _ lsig) (ClassOpSig _ _ idps (L _ sigtype)) <- mkM sigs
+      L _ (Unqual name) <- mkM idps
+      bind <- case bagToList $ mapMaybeBag (morphBind name) binds of
+        [] -> errM . mkMsgEnvelope lsig (queryQual defaultErrStyle) $
+          "No definition given for impl method" <+> quote (ppr name)
+        matchingBinds -> mkM matchingBinds
       let (bndrs, nodep) = sigTyVars sigtype $ tyVars ty
           (ctxs, bareSigtype) = splitQual $ sig_body sigtype
       pure $ ClsInstDecl
@@ -62,7 +98,7 @@ desugarInst ClsInstDecl
         , cid_datafam_insts = []
         , cid_overlap_mode = Nothing
         }
-desugarInst inst = [inst]
+desugarInst inst = pure inst
 
 --------------------------------------------------------------------------------
 
