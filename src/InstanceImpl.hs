@@ -106,7 +106,7 @@ mkImport :: ModuleName -> LImportDecl GhcPs
 mkImport modName = gen $ ImportDecl
   { ideclExt = EpAnnNotUsed
   , ideclSourceSrc = NoSourceText
-  , ideclName = genL modName
+  , ideclName = gen modName
   , ideclPkgQual = Nothing
   , ideclSource = NotBoot
   , ideclSafe = False
@@ -196,13 +196,10 @@ self = gen . VarPat noExtField . gen . Unqual $ mkVarOcc "self"
 
 --------------------------------------------------------------------------------
 
-gen :: a -> GenLocated (SrcSpanAnn' (EpAnn' ann)) a
+gen :: a -> GenLocated (SrcSpanAnn' (EpAnn ann)) a
 gen = L genSrcSpanAnn
 
-genL :: a -> Located a
-genL = L genSrcSpan
-
-genSrcSpanAnn :: SrcSpanAnn' (EpAnn' ann)
+genSrcSpanAnn :: SrcSpanAnn' (EpAnn ann)
 genSrcSpanAnn = SrcSpanAnn EpAnnNotUsed genSrcSpan
 
 genSrcSpan :: SrcSpan

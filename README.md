@@ -3,7 +3,7 @@
 A GHC plugin that adds a special rust inspired syntax for declaring instances of
 [`GHC.Records.HasField`](https://hackage.haskell.org/package/base-4.15.0.0/docs/GHC-Records.html),
 for use with
-[`-XOverloadedRecordDot`](https://downloads.haskell.org/ghc/9.2.1-alpha1/docs/html/users_guide/exts/overloaded_record_dot.html)
+[`-XOverloadedRecordDot`](https://downloads.haskell.org/ghc/9.2.1/docs/html/users_guide/exts/overloaded_record_dot.html)
 (introduced in GHC 9.2).
 
 See [this blog
