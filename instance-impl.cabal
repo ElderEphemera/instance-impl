@@ -38,7 +38,7 @@ test-suite instance-impl-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   hs-source-dirs: test
-  ghc-options: -Wall -Werror
+  ghc-options: -Wall
   build-depends:
     base >= 4.16.0 && < 4.17,
     instance-impl
